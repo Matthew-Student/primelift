@@ -1266,6 +1266,107 @@ function openFullCalendar(routine) {
 }
 
 // ============================================================
+// WEIGHT ESTIMATION (Mifflin-St Jeor + Energy Balance)
+// ============================================================
+function getMondayKey() {
+  const now = new Date();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  return monday.toISOString().slice(0, 10); // YYYY-MM-DD of this week's Monday
+}
+
+function daysElapsedThisWeek() {
+  // 0 = Monday, 6 = Sunday
+  return (new Date().getDay() + 6) % 7;
+}
+
+// Mifflin-St Jeor BMR (most validated formula — Frankenfield et al. 2005)
+function mifflinBMR(weightKg, heightCm, ageYrs, sex) {
+  const base = 10 * weightKg + 6.25 * heightCm - 5 * ageYrs;
+  return sex === "female" ? base - 161 : base + 5;
+}
+
+async function getWeekDietData(uid) {
+  const monday = new Date();
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  let totalCals = 0, daysLogged = 0;
+  const elapsed = daysElapsedThisWeek() + 1; // days Mon→today inclusive
+  for (let i = 0; i < elapsed; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const dk = d.toISOString().slice(0, 10);
+    try {
+      const snap = await getDoc(doc(db, "users", uid, "diet", dk));
+      if (snap.exists()) {
+        const data = snap.data();
+        if ((data.calories || 0) > 0) { totalCals += data.calories; daysLogged++; }
+      }
+    } catch (_) {}
+  }
+  return { totalCals, daysLogged, elapsed };
+}
+
+async function calcWeightEstimate() {
+  if (!currentUser || !userProfile.weight || !userProfile.height) return null;
+
+  const weight   = userProfile.weight;
+  const height   = userProfile.height;
+  const age      = userProfile.age   || 25;
+  const sex      = userProfile.sex   || "male";
+
+  // Mifflin-St Jeor BMR (kcal/day)
+  const bmr = mifflinBMR(weight, height, age, sex);
+
+  // Sedentary TDEE base (activity added via exercise below for accuracy)
+  const sedentaryTDEE = bmr * 1.2;
+
+  // Completed workout days this week
+  const mondayKey = getMondayKey();
+  const completedDays = DAYS.filter(d =>
+    userProfile.workoutDone?.[`${mondayKey}-${d.id}`]
+  ).length;
+
+  // Exercise calorie burn: ~350 kcal per strength session (MET 4 × 60min × weight/60)
+  // More precise: MET 4.0 for weight training × 1hr × avg bodyweight 70kg ≈ 280 kcal
+  // We use 350 as a conservative moderate-intensity estimate (ACSM guidelines)
+  const exerciseBurnTotal = completedDays * 350;
+
+  // This week's diet calories from Firestore
+  const { totalCals, daysLogged, elapsed } = await getWeekDietData(currentUser.uid);
+
+  // Total calories burned so far this week
+  const burnSoFar = sedentaryTDEE * elapsed + exerciseBurnTotal;
+
+  // Net calorie balance (positive = surplus → weight gain; negative = deficit → loss)
+  const netBalance = totalCals - burnSoFar;
+
+  // Weight change so far: 1 kg body mass ≈ 7,700 kcal
+  // (adipose tissue ~87% fat at 9.4 kcal/g + ~13% water/protein → ~8,200 kcal/kg fat
+  //  but real-world weight includes water retention, glycogen → 7,700 is widely validated)
+  const weightChangeSoFar = netBalance / 7700;
+
+  // Project to full 7-day week at the same daily rate
+  const dailyNet = elapsed > 0 ? netBalance / elapsed : 0;
+  const projectedWeeklyNet = dailyNet * 7;
+  const projectedWeightChange = projectedWeeklyNet / 7700;
+  const projectedWeight = weight + projectedWeightChange;
+
+  return {
+    bmr: Math.round(bmr),
+    tdee: Math.round(sedentaryTDEE),
+    netBalance: Math.round(netBalance),
+    projectedWeightChange,
+    projectedWeight,
+    elapsed,
+    completedDays,
+    daysLogged,
+    totalCals: Math.round(totalCals),
+    burnSoFar: Math.round(burnSoFar),
+    hasData: daysLogged > 0,
+  };
+}
+
+// ============================================================
 // ROUTINE
 // ============================================================
 function renderRoutine() {
@@ -1372,6 +1473,8 @@ function renderRoutine() {
       const day = (routine || {})[d.id] || { rest: true };
       const isToday = weekDays[i].toDateString() === today.toDateString();
       const todayBadge = isToday ? ' <span style="font-family:var(--font-mono);font-size:10px;color:var(--accent-light);letter-spacing:1px;background:rgba(168,85,247,0.15);padding:2px 6px;border-radius:3px;margin-left:6px;vertical-align:2px;">TODAY</span>' : '';
+      const mondayKey = getMondayKey();
+      const isDone = !!(userProfile.workoutDone?.[`${mondayKey}-${d.id}`]);
       if (day.rest) {
         return `<div id="day-${d.id}" class="day-card rest" style="animation-delay:${i*0.05}s">
           <div class="day-card-header">
@@ -1385,7 +1488,7 @@ function renderRoutine() {
           ${day.note ? `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-faint);letter-spacing:0.5px">${day.note}</div>` : ''}
         </div>`;
       }
-      return `<div id="day-${d.id}" class="day-card" style="animation-delay:${i*0.05}s">
+      return `<div id="day-${d.id}" class="day-card ${isDone ? 'day-done' : ''}" style="animation-delay:${i*0.05}s">
         <div class="day-card-header">
           <div class="day-name">${d.name}${todayBadge}</div>
           <div style="display:flex;align-items:center;gap:6px">
@@ -1394,14 +1497,18 @@ function renderRoutine() {
             <button class="day-edit-btn" data-day="${d.id}">✎ Edit</button>
           </div>
         </div>
-        ${day.exercises.map(ex => `<div class="day-exercise">
+        ${day.exercises.map(ex => `<div class="day-exercise ${isDone ? 'ex-done' : ''}">
           <span class="day-ex-name">${ex.name}</span>
           <span class="day-ex-sr">${ex.sets} × ${ex.reps}</span>
         </div>`).join("")}
+        <button class="day-done-btn ${isDone ? 'is-done' : ''}" data-day="${d.id}">
+          ${isDone ? '✓ DONE' : '○ Mark as Done'}
+        </button>
       </div>`;
     }).join("")}
 
     <button id="routine-regen" class="btn" style="margin-top:16px;background:var(--bg-card);border:1px solid var(--border)">Regenerate Routine</button>
+    <div id="weight-est-panel" style="margin-top:16px"></div>
   `;
 
   $$(".week-cal-day").forEach(el => {
@@ -1430,6 +1537,113 @@ function renderRoutine() {
     await setDoc(doc(db, "users", currentUser.uid), { routine: newRoutine }, { merge: true });
     showToast("Routine regenerated");
   });
+
+  // Mark done buttons
+  $$(".day-done-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const dayId = btn.dataset.day;
+      const mondayKey = getMondayKey();
+      const doneKey = `${mondayKey}-${dayId}`;
+      const current = !!(userProfile.workoutDone?.[doneKey]);
+      const newVal = !current;
+      btn.disabled = true;
+      try {
+        await setDoc(doc(db, "users", currentUser.uid),
+          { workoutDone: { [doneKey]: newVal } }, { merge: true });
+        userProfile.workoutDone = { ...(userProfile.workoutDone || {}), [doneKey]: newVal };
+        showToast(newVal ? "Workout marked done ✓" : "Unmarked");
+        renderRoutine();
+      } catch (e) {
+        showToast("Error saving");
+        btn.disabled = false;
+      }
+    });
+  });
+
+  // Weight estimate panel
+  renderWeightEstimate();
+}
+
+async function renderWeightEstimate() {
+  const panel = $("weight-est-panel");
+  if (!panel) return;
+
+  if (!userProfile.weight || !userProfile.height) {
+    panel.innerHTML = `<div class="weight-est-card"><div class="we-title">⚖️ WEIGHT ESTIMATE</div>
+      <div class="we-note">Set your height &amp; weight in Profile to unlock weekly weight estimation.</div></div>`;
+    return;
+  }
+
+  panel.innerHTML = `<div class="weight-est-card"><div class="we-title">⚖️ WEIGHT ESTIMATE <span class="we-loading">Loading…</span></div></div>`;
+
+  const est = await calcWeightEstimate();
+  if (!est) { panel.innerHTML = ""; return; }
+
+  const changeSign = est.projectedWeightChange >= 0 ? "+" : "";
+  const changeColor = est.projectedWeightChange > 0.1 ? "var(--gold)"
+    : est.projectedWeightChange < -0.1 ? "var(--accent-light)"
+    : "var(--success)";
+
+  const noData = !est.hasData;
+  const projW = est.projectedWeight.toFixed(1);
+  const projDelta = `${changeSign}${est.projectedWeightChange.toFixed(2)} kg`;
+
+  panel.innerHTML = `
+    <div class="weight-est-card">
+      <div class="we-title">⚖️ WEEKLY WEIGHT ESTIMATE</div>
+      <div class="we-formula-note">Mifflin-St Jeor BMR · 7,700 kcal = 1 kg</div>
+
+      <div class="we-stats">
+        <div class="we-stat"><div class="we-stat-val">${est.bmr}</div><div class="we-stat-lbl">BMR (kcal)</div></div>
+        <div class="we-stat"><div class="we-stat-val">${est.tdee}</div><div class="we-stat-lbl">Sedentary TDEE</div></div>
+        <div class="we-stat"><div class="we-stat-val">${est.completedDays}</div><div class="we-stat-lbl">Workouts Done</div></div>
+        <div class="we-stat"><div class="we-stat-val">${est.daysLogged}/${est.elapsed}</div><div class="we-stat-lbl">Days Logged</div></div>
+      </div>
+
+      <div class="we-balance">
+        <div class="we-bal-row"><span>Calories consumed (this week)</span><span>${est.totalCals.toLocaleString()} kcal</span></div>
+        <div class="we-bal-row"><span>Calories burned (TDEE + exercise)</span><span>${est.burnSoFar.toLocaleString()} kcal</span></div>
+        <div class="we-bal-row we-bal-net"><span>Net balance</span><span style="color:${est.netBalance > 0 ? 'var(--gold)' : 'var(--success)'}">${est.netBalance > 0 ? '+' : ''}${est.netBalance.toLocaleString()} kcal</span></div>
+      </div>
+
+      ${noData ? `<div class="we-note">⚠️ Log meals in the Diet tab to improve accuracy.</div>` : ""}
+
+      <div class="we-result">
+        <div class="we-proj-label">Projected end-of-week weight</div>
+        <div class="we-proj-weight">${projW} <span style="font-size:14px">kg</span></div>
+        <div class="we-proj-delta" style="color:${changeColor}">${projDelta} from current ${userProfile.weight} kg</div>
+        <div class="we-note" style="margin-top:6px">Based on ${est.elapsed} day(s) tracked · updates when you log meals &amp; mark workouts done</div>
+      </div>
+    </div>
+  `;
+}
+
+async function renderDietWeightEstimate() {
+  const panel = $("diet-weight-est-card");
+  if (!panel) return;
+  if (!userProfile.weight || !userProfile.height) { panel.style.display = "none"; return; }
+  panel.style.display = "";
+
+  const est = await calcWeightEstimate();
+  if (!est) { panel.style.display = "none"; return; }
+
+  const sign = est.projectedWeightChange >= 0 ? "+" : "";
+  const color = est.projectedWeightChange > 0.1 ? "var(--gold)"
+    : est.projectedWeightChange < -0.1 ? "var(--accent-light)"
+    : "var(--success)";
+  const arrow = est.projectedWeightChange > 0.05 ? "↑" : est.projectedWeightChange < -0.05 ? "↓" : "→";
+
+  panel.innerHTML = `
+    <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:1.5px;margin-bottom:8px">⚖️ PROJECTED WEIGHT (END OF WEEK)</div>
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <div style="font-size:28px;font-weight:700;color:var(--text)">${est.projectedWeight.toFixed(1)} <span style="font-size:13px;color:var(--text-dim)">kg</span></div>
+      <div style="font-family:var(--font-mono);font-size:13px;color:${color};font-weight:600">${arrow} ${sign}${est.projectedWeightChange.toFixed(2)} kg this week</div>
+    </div>
+    <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);margin-top:6px;letter-spacing:0.5px">
+      BMR ${est.bmr} kcal · ${est.completedDays} workout(s) done · ${est.daysLogged}/${est.elapsed} days diet logged
+      ${!est.hasData ? ' · <span style="color:var(--gold)">Log meals for better accuracy</span>' : ''}
+    </div>
+  `;
 }
 
 // ============================================================
@@ -2003,6 +2217,9 @@ function renderDiet() {
       <strong>How this is calculated:</strong> Mifflin-St Jeor BMR formula → multiplied by activity factor for TDEE → adjusted by ${goal.calOffset > 0 ? "+" : ""}${goal.calOffset}kcal for ${goal.name.toLowerCase()}. Protein at ${goal.proteinPerKg}g/kg bodyweight (research-backed for trained lifters). Fat at ${(goal.fatPct*100)|0}% of calories. Carbs fill the remainder.
     </div>
 
+    <!-- ======== WEIGHT ESTIMATE (diet tab) ======== -->
+    <div class="card" id="diet-weight-est-card" style="padding:14px 16px"></div>
+
     <!-- ======== AI PHOTO LOG ======== -->
     <div class="card photo-diet-card">
       <div class="pd-header">
@@ -2071,6 +2288,10 @@ function renderDiet() {
 
   // ── AI Photo Log ──
   $("photo-log-btn")?.addEventListener("click", () => $("photo-file-input")?.click());
+
+  // Populate diet-tab weight estimate
+  renderDietWeightEstimate();
+
 
   $("photo-file-input")?.addEventListener("change", async (e) => {
     const file = e.target.files?.[0];

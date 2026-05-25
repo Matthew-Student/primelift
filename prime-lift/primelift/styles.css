@@ -1877,6 +1877,127 @@
     }
     .day-edit-btn:active { background: rgba(168,85,247,0.25); transform: scale(0.96); }
 
+    /* Mark Done button */
+    .day-done-btn {
+      margin-top: 10px;
+      width: 100%;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      color: var(--text-dim);
+      background: transparent;
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      padding: 7px 0;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .day-done-btn:hover { border-color: var(--success); color: var(--success); }
+    .day-done-btn.is-done {
+      background: rgba(34,197,94,0.12);
+      border: 1px solid var(--success);
+      color: var(--success);
+      font-weight: 700;
+    }
+    .day-done-btn:active { transform: scale(0.98); }
+
+    /* Done day card state */
+    .day-card.day-done { border-color: rgba(34,197,94,0.35); }
+    .day-exercise.ex-done .day-ex-name { text-decoration: line-through; color: var(--text-faint); }
+    .day-exercise.ex-done .day-ex-sr { color: var(--text-faint); }
+
+    /* Weight estimate card (routine tab) */
+    .weight-est-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .we-title {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      color: var(--accent-light);
+      margin-bottom: 4px;
+    }
+    .we-loading { color: var(--text-faint); font-size: 10px; }
+    .we-formula-note {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      color: var(--text-faint);
+      letter-spacing: 0.5px;
+      margin-bottom: 14px;
+    }
+    .we-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .we-stat {
+      background: var(--bg-page);
+      border-radius: 6px;
+      padding: 8px 4px;
+      text-align: center;
+    }
+    .we-stat-val {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.2;
+    }
+    .we-stat-lbl {
+      font-family: var(--font-mono);
+      font-size: 8px;
+      color: var(--text-faint);
+      letter-spacing: 0.5px;
+      margin-top: 2px;
+    }
+    .we-balance {
+      background: var(--bg-page);
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+    }
+    .we-bal-row {
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      padding: 3px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .we-bal-row:last-child { border-bottom: none; }
+    .we-bal-net { font-weight: 700; color: var(--text) !important; }
+    .we-result { text-align: center; padding-top: 8px; }
+    .we-proj-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-dim);
+      letter-spacing: 1px;
+      margin-bottom: 6px;
+    }
+    .we-proj-weight {
+      font-size: 36px;
+      font-weight: 800;
+      color: var(--text);
+      line-height: 1;
+    }
+    .we-proj-delta {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      margin-top: 4px;
+    }
+    .we-note {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      color: var(--text-faint);
+      letter-spacing: 0.5px;
+      line-height: 1.5;
+    }
+
     .toggle-rest-btn {
       display: inline-flex;
       align-items: center;
