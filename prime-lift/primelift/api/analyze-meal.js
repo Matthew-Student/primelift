@@ -5,6 +5,15 @@
 // Get a free key at: https://aistudio.google.com/app/apikey
 // ============================================================
 
+const MODELS = [
+  "gemini-2.0-flash-exp",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash-latest",
+  "gemini-1.5-flash-001",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro-latest",
+];
+
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -43,42 +52,54 @@ Rules:
 - If multiple foods are plated together, sum the nutrition for the full plate.
 - Do NOT output anything outside the JSON object.`;
 
-  try {
-    const apiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+  const body = JSON.stringify({
+    contents: [
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { inline_data: { mime_type: mimeType, data: imageBase64 } },
-                { text: prompt },
-              ],
-            },
-          ],
-          generationConfig: { maxOutputTokens: 512, temperature: 0.2 },
-        }),
+        parts: [
+          { inline_data: { mime_type: mimeType, data: imageBase64 } },
+          { text: prompt },
+        ],
+      },
+    ],
+    generationConfig: { maxOutputTokens: 512, temperature: 0.2 },
+  });
+
+  let lastError = "No models available";
+
+  // Try each model in order until one works
+  for (const model of MODELS) {
+    try {
+      const apiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body }
+      );
+
+      if (apiRes.status === 404) {
+        lastError = `Model ${model} not found`;
+        continue; // try next model
       }
-    );
 
-    if (!apiRes.ok) {
-      const errText = await apiRes.text();
-      console.error("Gemini error:", errText);
-      return res.status(502).json({ error: "AI API returned an error", detail: errText });
+      if (!apiRes.ok) {
+        const errText = await apiRes.text();
+        console.error(`Gemini error (${model}):`, errText);
+        return res.status(502).json({ error: "AI API returned an error", detail: errText });
+      }
+
+      const data = await apiRes.json();
+      const rawText = (data.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        return res.status(500).json({ error: "Could not parse AI response", raw: rawText });
+      }
+
+      console.log(`Success with model: ${model}`);
+      return res.status(200).json(JSON.parse(jsonMatch[0]));
+
+    } catch (err) {
+      lastError = err.message;
+      continue;
     }
-
-    const data = await apiRes.json();
-    const rawText = (data.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
-    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return res.status(500).json({ error: "Could not parse AI response", raw: rawText });
-    }
-
-    return res.status(200).json(JSON.parse(jsonMatch[0]));
-  } catch (err) {
-    console.error("Function error:", err);
-    return res.status(500).json({ error: "Server error", detail: err.message });
   }
+
+  return res.status(503).json({ error: "No Gemini model available", detail: lastError });
 };
