@@ -10,7 +10,7 @@ import {
   signOut, updateProfile, deleteUser
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, doc, setDoc, getDoc, addDoc, deleteDoc,
+  getFirestore, doc, setDoc, updateDoc, getDoc, addDoc, deleteDoc,
   collection, query, orderBy, limit, onSnapshot, getDocs,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1548,8 +1548,8 @@ function renderRoutine() {
       const newVal = !current;
       btn.disabled = true;
       try {
-        await setDoc(doc(db, "users", currentUser.uid),
-          { workoutDone: { [doneKey]: newVal } }, { merge: true });
+        await updateDoc(doc(db, "users", currentUser.uid),
+          { [`workoutDone.${doneKey}`]: newVal });
         userProfile.workoutDone = { ...(userProfile.workoutDone || {}), [doneKey]: newVal };
         showToast(newVal ? "Workout marked done ✓" : "Unmarked");
         renderRoutine();
@@ -1855,15 +1855,32 @@ function openDayEditor(dayId, routine) {
     saveBtn.textContent = "Saving…";
     saveBtn.disabled = true;
     try {
-      await setDoc(doc(db, "users", currentUser.uid), { routine: newRoutine }, { merge: true });
-      userProfile.routine = newRoutine; // update local copy immediately
+      // Use updateDoc with a dotted field path — only touches this specific day,
+      // never overwrites other days or other profile fields
+      const dayData = newRoutine[dayId];
+      await updateDoc(doc(db, "users", currentUser.uid), {
+        [`routine.${dayId}`]: dayData
+      });
+      if (!userProfile.routine) userProfile.routine = {};
+      userProfile.routine[dayId] = dayData; // update local copy immediately
       showToast("Day saved ✓");
-      renderRoutine(); // explicit re-render — don't wait for onSnapshot
+      renderRoutine();
     } catch (err) {
       console.error("Save error:", err);
-      showToast("Save failed: " + err.message);
-      saveBtn.textContent = "Save";
-      saveBtn.disabled = false;
+      // If updateDoc fails because the document has no routine field yet, fall back to setDoc
+      try {
+        const dayData = newRoutine[dayId];
+        await setDoc(doc(db, "users", currentUser.uid), { routine: { [dayId]: dayData } }, { merge: true });
+        if (!userProfile.routine) userProfile.routine = {};
+        userProfile.routine[dayId] = dayData;
+        showToast("Day saved ✓");
+        renderRoutine();
+      } catch (err2) {
+        console.error("Fallback save error:", err2);
+        showToast("Save failed: " + err2.message);
+        saveBtn.textContent = "Save";
+        saveBtn.disabled = false;
+      }
     }
   });
 }

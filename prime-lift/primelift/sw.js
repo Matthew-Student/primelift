@@ -1,5 +1,5 @@
 // Prime Lift — Service Worker
-const CACHE = "primelift-v5";
+const CACHE = "primelift-v6";
 const SHELL = [
   "./",
   "./index.html",
