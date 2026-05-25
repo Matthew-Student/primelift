@@ -2009,7 +2009,7 @@ function renderDiet() {
         <span class="pd-title">📸 AI PHOTO LOG</span>
         <span class="pd-badge">BETA</span>
       </div>
-      <div class="pd-sub">Snap your meal — Claude AI estimates the nutrition in seconds. Works best with clearly plated food.</div>
+      <div class="pd-sub">Snap your meal — Gemini AI estimates the nutrition in seconds. Works best with clearly plated food.</div>
       <button id="photo-log-btn" class="btn" style="margin-top:10px">📷 Log Meal with Photo</button>
       <input type="file" id="photo-file-input" accept="image/*" style="display:none">
       <div id="photo-panel" style="display:none;margin-top:12px"></div>
